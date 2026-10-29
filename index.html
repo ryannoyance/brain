@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cut Into My Brain</title>
+<style>
+  html,body{margin:0;height:100%;background:#141517;color:#ddd;font:13px/1.3 -apple-system,system-ui,sans-serif;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none}
+  #ui{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;
+      background:rgba(30,31,34,.85);backdrop-filter:blur(8px);padding:10px 14px;border-radius:12px;border:1px solid #2c2d31;max-width:calc(100vw - 40px)}
+  button{background:#2a2b2f;color:#ddd;border:1px solid #3a3b40;border-radius:8px;padding:6px 10px;font:inherit;cursor:pointer}
+  button.on{background:#e6e6e6;color:#111;border-color:#e6e6e6}
+  input[type=range]{width:170px;accent-color:#e6e6e6}
+  label{display:flex;gap:6px;align-items:center;color:#999}
+  #load{position:fixed;inset:0;display:grid;place-items:center;color:#777}
+  #hint{position:fixed;top:14px;left:16px;color:#666;font-size:12px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="load">loading brain…</div>
+<div id="hint">drag to orbit · scroll / pinch to zoom · splat + MRI 2022-02-19</div>
+<div id="ui">
+  <button data-m="0" class="on">Head</button><button data-m="1">Brain</button><button data-m="2">Organs</button><button id="colz" class="on">Color</button><span style="width:6px"></span>
+  <button data-ax="cor" class="on">Face</button>
+  <button data-ax="sag">Side</button>
+  <button data-ax="ax">Top</button>
+  <label>cut <input id="depth" type="range" min="0" max="1" step="0.002" value="0.68"></label>
+  <button id="flip">Flip</button>
+  <label>tilt <input id="tilt" type="range" min="-45" max="45" step="1" value="0"></label>
+</div>
+<script type="module">
+import meta from './meta.js';
+async function unpack(b64){const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  return new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();}
+const mods = await Promise.all(['vol','splat','skin','brain','organs','labels'].map(n=>import('./'+n+'.js')));
+const [volMod, splMod, skMod, brMod, orgMod, labMod] = mods;
+const [volBuf, splBuf, skBuf, brBuf, orgBuf, labBuf] = await Promise.all(mods.map(m=>unpack(m.default)));
+const N = splMod.N;
+const POS = new Float32Array(splBuf, 0, N*3), COV = new Float32Array(splBuf, N*12, N*6), RGBA = new Uint8Array(splBuf, N*36, N*4);
+document.getElementById('load').remove();
+
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', {antialias:false, premultipliedAlpha:false});
+function resize(){const d=Math.min(devicePixelRatio,2); cv.width=innerWidth*d; cv.height=innerHeight*d; gl.viewport(0,0,cv.width,cv.height);}
+addEventListener('resize',()=>{resize();dirty=true;}); resize();
+
+function prog(vs,fs){const p=gl.createProgram();for(const [t,s] of [[gl.VERTEX_SHADER,vs],[gl.FRAGMENT_SHADER,fs]]){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);
+  if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(sh);gl.attachShader(p,sh);}gl.linkProgram(p);return p;}
+
+// ---------- splats ----------
+const sp = prog(`#version 300 es
+precision highp float;
+in vec2 corner; in vec3 c; in vec3 cA; in vec3 cB; in vec4 col;
+uniform mat4 V,P; uniform vec2 vp; uniform vec4 plane;
+out vec4 vcol; out vec2 vpos;
+void main(){
+  if(dot(plane.xyz,c)+plane.w<0.){gl_Position=vec4(0,0,2,1);return;}
+  vec4 cam=V*vec4(c,1.); vec4 clip=P*cam;
+  float bound=1.2*clip.w; if(clip.z<-clip.w||clip.x<-bound||clip.x>bound||clip.y<-bound||clip.y>bound){gl_Position=vec4(0,0,2,1);return;}
+  mat3 S=mat3(cA.x,cA.y,cA.z, cA.y,cB.x,cB.y, cA.z,cB.y,cB.z);
+  float fx=P[0][0]*vp.x*.5, fy=P[1][1]*vp.y*.5;
+  mat3 J=mat3(fx/cam.z,0.,0., 0.,fy/cam.z,0., -fx*cam.x/(cam.z*cam.z),-fy*cam.y/(cam.z*cam.z),0.);
+  mat3 T=J*mat3(V);
+  mat3 c2=T*S*transpose(T);
+  float a=c2[0][0]+.3, b=c2[0][1], d=c2[1][1]+.3;
+  float mid=.5*(a+d), rad=length(vec2(.5*(a-d),b));
+  float l1=mid+rad, l2=max(mid-rad,.1);
+  vec2 dv=normalize(vec2(b,l1-a)); if(abs(b)<1e-6) dv = a>=d?vec2(1,0):vec2(0,1);
+  vec2 ax1=min(sqrt(2.*l1),1024.)*dv, ax2=min(sqrt(2.*l2),1024.)*vec2(dv.y,-dv.x);
+  vec2 ctr=clip.xy/clip.w;
+  vpos=corner*2.;
+  vcol=col;
+  gl_Position=vec4(ctr+(corner.x*ax1+corner.y*ax2)*2./vp, clip.z/clip.w, 1.);
+}`,`#version 300 es
+precision highp float; in vec4 vcol; in vec2 vpos; out vec4 o;
+void main(){ float A=-dot(vpos,vpos); if(A<-4.) discard; float B=exp(A)*vcol.a; if(B<1./255.) discard; o=vec4(vcol.rgb*B,B); }`);
+const vao=gl.createVertexArray(); gl.bindVertexArray(vao);
+function buf(data,loc,size,type,norm,div,stride=0,off=0){const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,data,gl.DYNAMIC_DRAW);
+  return b;}
+const quad=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,quad); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,1,1,-1,1]),gl.STATIC_DRAW);
+let L=gl.getAttribLocation(sp,'corner'); gl.enableVertexAttribArray(L); gl.vertexAttribPointer(L,2,gl.FLOAT,false,0,0);
+const fb=gl.createBuffer(), cb=gl.createBuffer();
+const fdata=new Float32Array(N*9), cdata=new Uint8Array(N*4);
+gl.bindBuffer(gl.ARRAY_BUFFER,fb); gl.bufferData(gl.ARRAY_BUFFER,fdata.byteLength,gl.DYNAMIC_DRAW);
+for(const [n,off] of [['c',0],['cA',12],['cB',24]]){L=gl.getAttribLocation(sp,n);gl.enableVertexAttribArray(L);gl.vertexAttribPointer(L,3,gl.FLOAT,false,36,off);gl.vertexAttribDivisor(L,1);}
+gl.bindBuffer(gl.ARRAY_BUFFER,cb); gl.bufferData(gl.ARRAY_BUFFER,cdata.byteLength,gl.DYNAMIC_DRAW);
+L=gl.getAttribLocation(sp,'col'); gl.enableVertexAttribArray(L); gl.vertexAttribPointer(L,4,gl.UNSIGNED_BYTE,true,0,0); gl.vertexAttribDivisor(L,1);
+gl.bindVertexArray(null);
+
+const depthKey=new Float32Array(N), order=new Uint32Array(N), counts=new Uint32Array(65536), tmp=new Uint32Array(N);
+function sortSplats(fwd){
+  let mn=Infinity,mx=-Infinity;
+  for(let i=0;i<N;i++){const d=fwd[0]*POS[3*i]+fwd[1]*POS[3*i+1]+fwd[2]*POS[3*i+2];depthKey[i]=d;if(d<mn)mn=d;if(d>mx)mx=d;}
+  counts.fill(0); const s=65535/(mx-mn||1);
+  for(let i=0;i<N;i++){const k=65535-((depthKey[i]-mn)*s|0);tmp[i]=k;counts[k]++;}  // far first
+  let sum=0; for(let k=0;k<65536;k++){const c=counts[k];counts[k]=sum;sum+=c;}
+  for(let i=0;i<N;i++) order[counts[tmp[i]]++]=i;
+  for(let j=0;j<N;j++){const i=order[j];
+    fdata[9*j]=POS[3*i];fdata[9*j+1]=POS[3*i+1];fdata[9*j+2]=POS[3*i+2];
+    for(let k=0;k<6;k++) fdata[9*j+3+k]=COV[6*i+k];
+    cdata[4*j]=RGBA[4*i];cdata[4*j+1]=RGBA[4*i+1];cdata[4*j+2]=RGBA[4*i+2];cdata[4*j+3]=RGBA[4*i+3];}
+  gl.bindBuffer(gl.ARRAY_BUFFER,fb); gl.bufferSubData(gl.ARRAY_BUFFER,0,fdata);
+  gl.bindBuffer(gl.ARRAY_BUFFER,cb); gl.bufferSubData(gl.ARRAY_BUFFER,0,cdata);
+}
+
+// ---------- MRI cap ----------
+const PAL=`const vec3 PAL[10]=vec3[10](vec3(0),vec3(.96,.78,.35),vec3(.80,.30,.30),vec3(.42,.44,.55),vec3(.35,.68,.95),vec3(.92,.55,.62),vec3(.97,.93,.84),vec3(.15,.38,.95),vec3(1.,1.,1.),vec3(.1,.9,.85));`;
+const cp = prog(`#version 300 es
+in vec2 q; uniform mat4 V,P; uniform vec3 o,u,v; out vec3 wp;
+void main(){ wp=o+q.x*u+q.y*v; gl_Position=P*V*vec4(wp,1.); }`,`#version 300 es
+precision highp float; precision highp sampler3D;
+uniform sampler3D vol; uniform sampler3D lab; uniform float W,D; uniform int mode, colz; in vec3 wp; out vec4 o;
+${PAL}
+void main(){
+  vec3 t=vec3((wp.x+W*.5)/W,(W*.5-wp.z)/W,(wp.y+D*.5)/D);
+  if(any(lessThan(t,vec3(0.)))||any(greaterThan(t,vec3(1.)))) discard;
+  vec3 s=texture(vol,t).rgb; if((mode==1?s.b:s.g)<.5) discard;
+  float g=pow(clamp(s.r*1.15,0.,1.),.9);
+  vec3 c=vec3(g);
+  if(colz==1){ int L=int(texture(lab,t).r*255.+.5); if(L>0) c = L>=8 ? mix(vec3(g),PAL[L],.75) : mix(vec3(g),PAL[L]*(.35+.9*g),.7); }
+  o=vec4(c,1.);
+}`);
+function tex3(fmt,ifmt,dims,data,filter){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_3D,t);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
+  gl.texImage3D(gl.TEXTURE_3D,0,ifmt,dims[0],dims[1],dims[2],0,fmt,gl.UNSIGNED_BYTE,data);
+  for(const p of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_3D,p,filter);
+  for(const p of [gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T,gl.TEXTURE_WRAP_R]) gl.texParameteri(gl.TEXTURE_3D,p,gl.CLAMP_TO_EDGE); return t;}
+const tex=tex3(gl.RGB,gl.RGB8,meta.dims,new Uint8Array(volBuf),gl.LINEAR);
+const ltex=tex3(gl.RED,gl.R8,meta.dims,new Uint8Array(labBuf),gl.NEAREST);
+const cvao=gl.createVertexArray(); gl.bindVertexArray(cvao);
+const qb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,qb); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-300,-300,300,-300,300,300,-300,300]),gl.STATIC_DRAW);
+L=gl.getAttribLocation(cp,'q'); gl.enableVertexAttribArray(L); gl.vertexAttribPointer(L,2,gl.FLOAT,false,0,0); gl.bindVertexArray(null);
+
+// ---------- meshes ----------
+const mp = prog(`#version 300 es
+in vec3 p; in vec3 n; in vec4 c; in float r; uniform mat4 V,P; out vec3 wp; out vec3 wn; out vec4 vc; out float vr;
+void main(){ wp=p; wn=n; vc=c; vr=r; gl_Position=P*V*vec4(p,1.); }`,`#version 300 es
+precision highp float; uniform vec4 plane; uniform vec3 eye; uniform int solid, cmode, hasN; uniform vec4 ucol; uniform float alpha;
+in vec3 wp; in vec3 wn; in vec4 vc; in float vr; out vec4 o;
+const vec3 RP[4]=vec3[4](vec3(.9,.62,.62),vec3(.92,.62,.66),vec3(.98,.68,.25),vec3(.62,.45,.95));
+void main(){ if(dot(plane.xyz,wp)+plane.w<0.) discard;
+  vec3 N = hasN==1 ? normalize(wn) : normalize(cross(dFdx(wp),dFdy(wp)));
+  vec3 Vd=normalize(eye-wp);
+  if(solid==1 && hasN==1 && dot(N,Vd)<0.){ o=vec4(.27,.24,.23,1.); return; }
+  if(dot(N,Vd)<0.) N=-N;
+  vec3 base = cmode==0 ? vc.rgb : cmode==1 ? RP[int(vr+.5)] : ucol.rgb;
+  vec3 Ld=normalize(vec3(.4,.6,.7));
+  float l=.35+.45*max(dot(N,Ld),0.)+.3*max(dot(N,Vd),0.);
+  float spec=.15*pow(max(dot(reflect(-Vd,N),Ld),0.),20.);
+  o=vec4((base*l+spec)*alpha, alpha); }`);
+function mkMesh(P,F,{N=null,C=null,R=null}={}){
+  const vao=gl.createVertexArray(); gl.bindVertexArray(vao);
+  const att=(name,data,size,type,norm)=>{const l=gl.getAttribLocation(mp,name); if(l<0)return; const b=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,b); gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW); gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l,size,type,norm,0,0);};
+  att('p',P,3,gl.FLOAT,false);
+  if(N) att('n',N,3,gl.FLOAT,false);
+  if(C) att('c',C,3,gl.UNSIGNED_BYTE,true);
+  if(R) att('r',R,1,gl.UNSIGNED_BYTE,false);
+  const ib=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,F,gl.STATIC_DRAW);
+  gl.bindVertexArray(null); return {vao,count:F.length,hasN:!!N};
+}
+const NV=skMod.NV, NF=skMod.NF;
+const skin=mkMesh(new Float32Array(skBuf,0,NV*3),new Uint32Array(skBuf.slice(NV*27,NV*27+NF*12)),{N:new Float32Array(skBuf,NV*12,NV*3),C:new Uint8Array(skBuf,NV*24,NV*3)});
+const BNV=brMod.NV, BNF=brMod.NF, bo=BNV*25+((4-BNV%4)%4);
+const brain=mkMesh(new Float32Array(brBuf,0,BNV*3),new Uint32Array(brBuf.slice(bo,bo+BNF*12)),{N:new Float32Array(brBuf,BNV*12,BNV*3),R:new Uint8Array(brBuf,BNV*24,BNV)});
+const org={}; for(const [k,[nv,nf,off]] of Object.entries(orgMod.H)) org[k]=mkMesh(new Float32Array(orgBuf,off,nv*3),new Uint32Array(orgBuf.slice(off+nv*12,off+nv*12+nf*12)));
+let mode=0, colz=1;
+
+// ---------- math ----------
+const sub=(a,b)=>a.map((x,i)=>x-b[i]), dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a);return a.map(x=>x/l);};
+function lookAt(e,t){const f=norm(sub(t,e)),s=norm(cross(f,[0,1,0])),u=cross(s,f);
+  return new Float32Array([s[0],u[0],f[0],0, s[1],u[1],f[1],0, s[2],u[2],f[2],0, -dot(s,e),-dot(u,e),-dot(f,e),1]);}
+function persp(fov,asp,n,f){const t=1/Math.tan(fov/2);return new Float32Array([t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)/(f-n),1, 0,0,-2*f*n/(f-n),0]);}
+// note: camera looks along +z in view space (OpenCV-style, matches splat projection); y flipped in P
+
+// ---------- camera ----------
+let yaw=0.5, pitch=0.1, dist=950; const target=[0,-55,0];
+let dirty=true, lastFwd=null;
+let drag=null; const ptrs=new Map();
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);});
+cv.addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId))return;const p=ptrs.get(e.pointerId);
+  if(ptrs.size===1){yaw-=(e.clientX-p[0])*0.008;pitch=Math.max(-1.4,Math.min(1.4,pitch+(e.clientY-p[1])*0.008));}
+  else if(ptrs.size===2){const [a,b]=[...ptrs.values()];const d0=Math.hypot(a[0]-b[0],a[1]-b[1]);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
+    const [c,d]=[...ptrs.values()];const d1=Math.hypot(c[0]-d[0],c[1]-d[1]);dist=Math.max(200,Math.min(1500,dist*d0/d1));dirty=true;return;}
+  ptrs.set(e.pointerId,[e.clientX,e.clientY]);dirty=true;});
+const up=e=>ptrs.delete(e.pointerId); cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
+cv.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(200,Math.min(1500,dist*Math.exp(e.deltaY*0.001)));dirty=true;},{passive:false});
+
+// ---------- cut controls ----------
+const ext={cor:[-110,110],sag:[-90,90],ax:[-125,92]};
+const base={cor:[0,0,-1],sag:[-1,0,0],ax:[0,-1,0]};
+let axis='cor', flip=false, plane=[0,0,-1,0], capO=[0,0,0], capU=[1,0,0], capV=[0,1,0];
+const depth=document.getElementById('depth'), tilt=document.getElementById('tilt');
+function rot(v,axv,a){const c=Math.cos(a),s=Math.sin(a),k=axv,d=dot(k,v),x=cross(k,v);return v.map((vi,i)=>vi*c+x[i]*s+k[i]*d*(1-c));}
+function update(){
+  let n=rot(base[axis], axis==='ax'?[1,0,0]:[0,1,0], +tilt.value*Math.PI/180);
+  if(flip) n=n.map(x=>-x);
+  const [a,b]=ext[axis], t=+depth.value, d=flip?b-(b-a)*t:a+(b-a)*t;
+  const p=base[axis].map(x=>-x*d);
+  plane=[...n,-dot(n,p)]; capO=p;
+  const h=Math.abs(n[1])>.9?[1,0,0]:[0,1,0]; capU=norm(cross(h,n)); capV=cross(n,capU);
+  dirty=true;
+}
+document.querySelectorAll('[data-ax]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-ax]').forEach(x=>x.classList.remove('on'));b.classList.add('on');axis=b.dataset.ax;update();});
+document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; if(mode===0){dist=950;target[1]=-55;}else if(mode===1){dist=560;target[1]=15;}else{dist=800;target[1]=-20;} dirty=true;});
+document.getElementById('colz').onclick=e=>{colz^=1;e.target.classList.toggle('on',!!colz);dirty=true;};
+document.getElementById('flip').onclick=()=>{flip=!flip;update();};
+depth.oninput=update; tilt.oninput=update; update();
+
+function frame(){
+  requestAnimationFrame(frame);
+  if(!dirty) return; dirty=false;
+  const eye=[target[0]+dist*Math.cos(pitch)*Math.sin(yaw), target[1]+dist*Math.sin(pitch), target[2]+dist*Math.cos(pitch)*Math.cos(yaw)];
+  const V=lookAt(eye,target), P=persp(0.6,cv.width/cv.height,10,5000);
+  const fwd=norm(sub(target,eye));
+  if(!lastFwd||dot(fwd,lastFwd)<0.9995){sortSplats(fwd);lastFwd=fwd;}
+  gl.clearColor(0.078,0.082,0.09,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); gl.disable(gl.BLEND); gl.colorMask(true,true,true,true);
+  // cap
+  gl.useProgram(cp); gl.bindVertexArray(cvao);
+  const U=(p,n)=>gl.getUniformLocation(p,n);
+  gl.uniformMatrix4fv(U(cp,'V'),false,V); gl.uniformMatrix4fv(U(cp,'P'),false,P);
+  gl.uniform3fv(U(cp,'o'),capO); gl.uniform3fv(U(cp,'u'),capU); gl.uniform3fv(U(cp,'v'),capV);
+  gl.uniform1i(U(cp,'mode'),mode); gl.uniform1i(U(cp,'colz'),colz); gl.uniform1f(U(cp,'W'),meta.W); gl.uniform1f(U(cp,'D'),meta.D);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_3D,tex); gl.uniform1i(U(cp,'vol'),0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_3D,ltex); gl.uniform1i(U(cp,'lab'),1);
+  gl.drawArrays(gl.TRIANGLE_FAN,0,4);
+  // meshes
+  gl.useProgram(mp);
+  gl.uniformMatrix4fv(U(mp,'V'),false,V); gl.uniformMatrix4fv(U(mp,'P'),false,P);
+  gl.uniform4fv(U(mp,'plane'),plane); gl.uniform3fv(U(mp,'eye'),eye);
+  const draw=(m,{cmode=2,col=[.8,.8,.8],alpha=1,solid=0}={})=>{gl.bindVertexArray(m.vao);
+    gl.uniform1i(U(mp,'cmode'),cmode); gl.uniform4f(U(mp,'ucol'),...col,1); gl.uniform1f(U(mp,'alpha'),alpha);
+    gl.uniform1i(U(mp,'solid'),solid); gl.uniform1i(U(mp,'hasN'),m.hasN?1:0);
+    gl.drawElements(gl.TRIANGLES,m.count,gl.UNSIGNED_INT,0);};
+  const ghost=(m,opt)=>{ // frontmost-layer transparency
+    gl.colorMask(false,false,false,false); gl.depthMask(true); gl.disable(gl.BLEND); draw(m,opt);
+    gl.colorMask(true,true,true,true); gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA); draw(m,opt);
+    gl.depthMask(true); gl.disable(gl.BLEND);};
+  const NEU=[.82,.74,.72];
+  if(mode===1){ draw(brain,{cmode:colz?1:2,col:[.86,.66,.64]}); return; }
+  if(mode===2){
+    draw(org.ven,{col:colz?[.15,.38,.95]:NEU});
+    draw(org.eyes,{col:colz?[.97,.97,1]:NEU});
+    draw(org.sinus,{col:colz?[.1,.9,.85]:NEU});
+    ghost(brain,{cmode:colz?1:2,col:NEU,alpha:.6});
+    ghost(org.skull,{col:colz?[.95,.9,.78]:NEU,alpha:.3});
+    ghost(skin,{cmode:colz?0:2,col:NEU,alpha:.14});
+    return; }
+  draw(skin,{cmode:0,solid:1});
+  // splats
+  gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(sp); gl.bindVertexArray(vao);
+  gl.uniformMatrix4fv(U(sp,'V'),false,V); gl.uniformMatrix4fv(U(sp,'P'),false,P);
+  gl.uniform2f(U(sp,'vp'),cv.width,cv.height); gl.uniform4fv(U(sp,'plane'),plane);
+  gl.drawArraysInstanced(gl.TRIANGLE_FAN,0,4,N);
+}
+frame();
+</script>
+</body>
+</html>
