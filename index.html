@@ -156,8 +156,8 @@ void main(){ if(cutx(wp)) discard;
   if(dot(N,Vd)<0.) N=-N;
   vec3 base = cmode==0 ? vc.rgb : cmode==1 ? RP[int(vr+.5)] : ucol.rgb;
   vec3 Ld=normalize(vec3(.4,.6,.7));
-  float l = cmode==0 ? .62+.25*max(dot(N,Ld),0.)+.2*max(dot(N,Vd),0.) : .35+.45*max(dot(N,Ld),0.)+.3*max(dot(N,Vd),0.);
-  float spec=.15*pow(max(dot(reflect(-Vd,N),Ld),0.),20.);
+  float l = cmode==0 ? .68+.22*max(dot(N,Ld),0.)+.08*max(dot(N,Vd),0.) : .35+.45*max(dot(N,Ld),0.)+.3*max(dot(N,Vd),0.);
+  float spec= cmode==0 ? 0. : .15*pow(max(dot(reflect(-Vd,N),Ld),0.),20.);
   o=vec4((base*l+spec)*alpha, alpha); }`);
 function mkMesh(P,F,{N=null,C=null,R=null}={}){
   const vao=gl.createVertexArray(); gl.bindVertexArray(vao);
