@@ -35,7 +35,7 @@
 <div id="hint">drag to orbit · scroll / pinch to zoom · splat + MRI 2022-02-19</div>
 <div id="ui">
   <div class="g"><button data-m="0" class="on">Head</button><button data-m="1">Brain</button><button data-m="2">Organs</button><button id="colz" class="on">Color</button></div>
-  <div class="g"><button data-ax="cor" class="on">Face</button><button data-ax="sag">Side</button><button data-ax="ax">Top</button><button id="flip">Flip</button></div>
+  <div class="g"><button data-ax="cor" class="on">Face</button><button data-ax="sag">Side</button><button data-ax="ax">Top</button><button id="flip">Flip</button><button id="party">Party</button></div>
   <div class="g sl"><label>cut <input id="depth" type="range" min="0" max="1" step="0.002" value="0.68"></label><label>tilt <input id="tilt" type="range" min="-45" max="45" step="1" value="0"></label></div>
 </div>
 <script type="module">
@@ -61,10 +61,10 @@ function prog(vs,fs){const p=gl.createProgram();for(const [t,s] of [[gl.VERTEX_S
 const sp = prog(`#version 300 es
 precision highp float;
 in vec2 corner; in vec3 c; in vec3 cA; in vec3 cB; in vec4 col;
-uniform mat4 V,P; uniform vec2 vp; uniform vec4 plane;
+uniform mat4 V,P; uniform vec2 vp; uniform vec4 planes[3]; uniform int np; bool cutx(vec3 x){ if(np==0) return false; for(int i=0;i<3;i++){ if(i>=np) break; if(dot(planes[i].xyz,x)+planes[i].w>=0.) return false; } return true; }
 out vec4 vcol; out vec2 vpos;
 void main(){
-  if(dot(plane.xyz,c)+plane.w<0.){gl_Position=vec4(0,0,2,1);return;}
+  if(cutx(c)){gl_Position=vec4(0,0,2,1);return;}
   vec4 cam=V*vec4(c,1.); vec4 clip=P*cam;
   float bound=1.2*clip.w; if(clip.z<-clip.w||clip.x<-bound||clip.x>bound||clip.y<-bound||clip.y>bound){gl_Position=vec4(0,0,2,1);return;}
   mat3 S=mat3(cA.x,cA.y,cA.z, cA.y,cB.x,cB.y, cA.z,cB.y,cB.z);
@@ -119,9 +119,10 @@ const cp = prog(`#version 300 es
 in vec2 q; uniform mat4 V,P; uniform vec3 o,u,v; out vec3 wp;
 void main(){ wp=o+q.x*u+q.y*v; gl_Position=P*V*vec4(wp,1.); }`,`#version 300 es
 precision highp float; precision highp sampler3D;
-uniform sampler3D vol; uniform sampler3D lab; uniform float W,D; uniform int mode, colz; in vec3 wp; out vec4 o;
+uniform sampler3D vol; uniform sampler3D lab; uniform float W,D; uniform int mode, colz, me; uniform vec4 planes[3]; uniform int np; in vec3 wp; out vec4 o;
 ${PAL}
 void main(){
+  for(int j=0;j<3;j++){ if(j>=np) break; if(j!=me && dot(planes[j].xyz,wp)+planes[j].w>=0.) discard; }
   vec3 t=vec3((wp.x+W*.5)/W,(W*.5-wp.z)/W,(wp.y+D*.5)/D);
   if(any(lessThan(t,vec3(0.)))||any(greaterThan(t,vec3(1.)))) discard;
   vec3 s=texture(vol,t).rgb; if((mode==1?s.b:s.g)<.5) discard;
@@ -144,14 +145,14 @@ L=gl.getAttribLocation(cp,'q'); gl.enableVertexAttribArray(L); gl.vertexAttribPo
 const mp = prog(`#version 300 es
 in vec3 p; in vec3 n; in vec4 c; in float r; uniform mat4 V,P; out vec3 wp; out vec3 wn; out vec4 vc; out float vr;
 void main(){ wp=p; wn=n; vc=c; vr=r; gl_Position=P*V*vec4(p,1.); }`,`#version 300 es
-precision highp float; uniform vec4 plane; uniform vec3 eye; uniform int solid, cmode, hasN, cutting, hideReg; uniform vec4 ucol; uniform float alpha;
+precision highp float; uniform vec4 planes[3]; uniform int np; bool cutx(vec3 x){ if(np==0) return false; for(int i=0;i<3;i++){ if(i>=np) break; if(dot(planes[i].xyz,x)+planes[i].w>=0.) return false; } return true; } uniform vec3 eye; uniform int solid, cmode, hasN, cutting, hideReg; uniform vec4 ucol; uniform float alpha;
 in vec3 wp; in vec3 wn; in vec4 vc; in float vr; out vec4 o;
 const vec3 RP[4]=vec3[4](vec3(.9,.62,.62),vec3(.92,.62,.66),vec3(.98,.68,.25),vec3(.62,.45,.95));
-void main(){ if(dot(plane.xyz,wp)+plane.w<0.) discard;
+void main(){ if(cutx(wp)) discard;
   if(hideReg!=0 && ((hideReg>>int(vr+.5))&1)==1) discard;
   vec3 N = hasN==1 ? normalize(wn) : normalize(cross(dFdx(wp),dFdy(wp)));
   vec3 Vd=normalize(eye-wp);
-  if(solid==1 && hasN==1 && dot(N,Vd)<0.){ if(cutting==0) discard; o=vec4(vc.rgb*.62+vec3(.04,.01,.01),1.); return; }
+  if(solid==1 && hasN==1 && dot(N,Vd)<0. && cutting==1){ o=vec4(vc.rgb*.62+vec3(.04,.01,.01),1.); return; }
   if(dot(N,Vd)<0.) N=-N;
   vec3 base = cmode==0 ? vc.rgb : cmode==1 ? RP[int(vr+.5)] : ucol.rgb;
   vec3 Ld=normalize(vec3(.4,.6,.7));
@@ -195,7 +196,7 @@ function persp(fov,asp,n,f){const t=1/Math.tan(fov/2);return new Float32Array([t
 let yaw=0.5, pitch=0.1, dist=950; const target=[0,-85,0];
 let dirty=true, lastFwd=null;
 let drag=null; const ptrs=new Map();
-cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);});
+cv.addEventListener('pointerdown',e=>{autoSpin=false;cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);});
 cv.addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId))return;const p=ptrs.get(e.pointerId);
   if(ptrs.size===1){yaw-=(e.clientX-p[0])*0.008;pitch=Math.max(-1.4,Math.min(1.4,pitch+(e.clientY-p[1])*0.008));}
   else if(ptrs.size===2){const [a,b]=[...ptrs.values()];const d0=Math.hypot(a[0]-b[0],a[1]-b[1]);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
@@ -204,6 +205,18 @@ cv.addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId))return;const p=p
 const up=e=>ptrs.delete(e.pointerId); cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
 cv.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(200,Math.min(1500,dist*Math.exp(e.deltaY*0.001)));dirty=true;},{passive:false});
 
+// ---------- party mode ----------
+let party=false, autoSpin=true; const t0=performance.now();
+const OCT=[[1,1,1],[-1,1,1],[1,-1,1],[-1,-1,1],[1,1,-1],[-1,1,-1]];
+function mkPlane(n,d){ const p=n.map(x=>-x*d); const h=Math.abs(n[1])>.9?[1,0,0]:[0,1,0]; const u=norm(cross(h,n)); return {p:[...n,-dot(n,p)],o:p,u,v:cross(n,u)}; }
+function partyPlanes(){
+  const t=(performance.now()-t0)/1000, k=Math.floor(t/7)%OCT.length, [sx,sy,sz]=OCT[k];
+  const a=0.35*Math.sin(t*0.23);
+  const nx=[-sx*Math.cos(a),0,-sx*Math.sin(a)], nz=[sz*Math.sin(a),0,-sz*Math.cos(a)], ny=[0,-sy,0];
+  const ph=t*0.9;
+  return [ mkPlane(nx, 5+35*Math.sin(ph)), mkPlane(ny, -10+40*Math.sin(ph*0.8+1.3)), mkPlane(nz, 5+45*Math.sin(ph*0.7+2.1)) ]
+    .map((q,i)=>q);
+}
 // ---------- cut controls ----------
 const ext={cor:[-110,145],sag:[-90,90],ax:[-125,92]};
 const base={cor:[0,0,-1],sag:[-1,0,0],ax:[0,-1,0]};
@@ -222,11 +235,13 @@ function update(){
 document.querySelectorAll('[data-ax]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-ax]').forEach(x=>x.classList.remove('on'));b.classList.add('on');axis=b.dataset.ax;update();});
 document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; syncLeg(); if(mode===2){depth.value=1; update();} if(mode===0){dist=950;target[1]=-85;}else if(mode===1){dist=560;target[1]=-20;}else{dist=800;target[1]=-55;} dirty=true;});
 document.getElementById('colz').onclick=e=>{colz^=1;e.target.classList.toggle('on',!!colz); syncLeg();dirty=true;};
+document.getElementById('party').onclick=e=>{party=!party; e.target.classList.toggle('on',party); dirty=true;};
 document.getElementById('flip').onclick=()=>{flip=!flip;update();};
 depth.oninput=update; tilt.oninput=update; update();
 
 function frame(){
   requestAnimationFrame(frame);
+  if(party){ dirty=true; if(autoSpin) yaw+=0.004; }
   if(!dirty) return; dirty=false;
   const eye=[target[0]+dist*Math.cos(pitch)*Math.sin(yaw), target[1]+dist*Math.sin(pitch), target[2]+dist*Math.cos(pitch)*Math.cos(yaw)];
   const V=lookAt(eye,target), P=persp(0.6,cv.width/cv.height,10,5000);
@@ -238,18 +253,20 @@ function frame(){
   gl.useProgram(cp); gl.bindVertexArray(cvao);
   const U=(p,n)=>gl.getUniformLocation(p,n);
   gl.uniformMatrix4fv(U(cp,'V'),false,V); gl.uniformMatrix4fv(U(cp,'P'),false,P);
-  gl.uniform3fv(U(cp,'o'),capO); gl.uniform3fv(U(cp,'u'),capU); gl.uniform3fv(U(cp,'v'),capV);
   gl.uniform1i(U(cp,'mode'),mode); gl.uniform1i(U(cp,'colz'),colz); gl.uniform1f(U(cp,'W'),meta.W); gl.uniform1f(U(cp,'D'),meta.D);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_3D,tex); gl.uniform1i(U(cp,'vol'),0);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_3D,ltex); gl.uniform1i(U(cp,'lab'),1);
-  gl.drawArrays(gl.TRIANGLE_FAN,0,4);
+  const PL=party?partyPlanes():[{p:plane,o:capO,u:capU,v:capV}];
+  const PF=new Float32Array(12); PL.forEach((q,i)=>PF.set(q.p,4*i));
+  gl.uniform4fv(U(cp,'planes'),PF); gl.uniform1i(U(cp,'np'),PL.length);
+  PL.forEach((q,i)=>{ gl.uniform1i(U(cp,'me'),i); gl.uniform3fv(U(cp,'o'),q.o); gl.uniform3fv(U(cp,'u'),q.u); gl.uniform3fv(U(cp,'v'),q.v); gl.drawArrays(gl.TRIANGLE_FAN,0,4); });
   // meshes
   gl.useProgram(mp);
   gl.uniformMatrix4fv(U(mp,'V'),false,V); gl.uniformMatrix4fv(U(mp,'P'),false,P);
-  gl.uniform4fv(U(mp,'plane'),plane); gl.uniform3fv(U(mp,'eye'),eye);
+  gl.uniform4fv(U(mp,'planes'),PF); gl.uniform1i(U(mp,'np'),PL.length); gl.uniform3fv(U(mp,'eye'),eye);
   const draw=(m,{cmode=2,col=[.8,.8,.8],alpha=1,solid=0}={})=>{gl.bindVertexArray(m.vao);
     gl.uniform1i(U(mp,'cmode'),cmode); gl.uniform4f(U(mp,'ucol'),...col,1); gl.uniform1f(U(mp,'alpha'),alpha);
-    gl.uniform1i(U(mp,'solid'),solid); gl.uniform1i(U(mp,'cutting'),(+depth.value<0.995)?1:0); gl.uniform1i(U(mp,'hasN'),m.hasN?1:0);
+    gl.uniform1i(U(mp,'solid'),solid); gl.uniform1i(U(mp,'cutting'),(party||+depth.value<0.995)?1:0); gl.uniform1i(U(mp,'hasN'),m.hasN?1:0);
     gl.drawElements(gl.TRIANGLES,m.count,gl.UNSIGNED_INT,0);};
   const ghost=(m,opt)=>{ // frontmost-layer transparency
     gl.colorMask(false,false,false,false); gl.depthMask(true); gl.disable(gl.BLEND); draw(m,opt);
@@ -271,7 +288,7 @@ function frame(){
   gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
   gl.useProgram(sp); gl.bindVertexArray(vao);
   gl.uniformMatrix4fv(U(sp,'V'),false,V); gl.uniformMatrix4fv(U(sp,'P'),false,P);
-  gl.uniform2f(U(sp,'vp'),cv.width,cv.height); gl.uniform4fv(U(sp,'plane'),plane);
+  gl.uniform2f(U(sp,'vp'),cv.width,cv.height); gl.uniform4fv(U(sp,'planes'),PF); gl.uniform1i(U(sp,'np'),PL.length);
   gl.drawArraysInstanced(gl.TRIANGLE_FAN,0,4,N);
 }
 frame();
