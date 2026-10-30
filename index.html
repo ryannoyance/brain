@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cut Into My Brain</title>
 <style>
@@ -24,18 +23,34 @@
   #leg .lt{color:#777;font-size:10px;padding:0 6px 2px}
   #leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
   @media (max-width:600px){ #ui{width:calc(100vw - 16px)} .g.sl{flex-basis:100%} }
+
+  @font-face{font-family:'ChicagoFLF';src:url('https://cdn.jsdelivr.net/gh/sakofchit/system.css@main/public/fonts/ChicagoFLF.woff2') format('woff2');}
+  body.embed{background:#141517}
+  body.embed #hint{display:none}
+  body.embed #ui{left:0;right:0;bottom:0;transform:none;width:auto;max-width:none;border-radius:0;background:#dddddd;border:0;border-top:1px solid #000;box-shadow:inset 0 1px 0 #fff;backdrop-filter:none;padding:6px 8px;gap:6px 10px}
+  body.embed #ui button{font-family:'ChicagoFLF',-apple-system,sans-serif;font-size:12px;color:#000;background:linear-gradient(#f4f4f4,#cfcfcf);border:1px solid #000;border-radius:4px;box-shadow:inset 1px 1px 0 #fff,inset -1px -1px 0 #999;padding:2px 9px}
+  body.embed #ui button.on{background:linear-gradient(#5a5a5a,#2c2c2c);color:#fff;box-shadow:inset 1px 1px 0 #777,inset -1px -1px 0 #111}
+  body.embed #ui label{color:#000;font-family:'ChicagoFLF',-apple-system,sans-serif}
+  body.embed input[type=range]{accent-color:#333}
+  body.embed #leg{font-family:'ChicagoFLF',-apple-system,sans-serif;background:#dddddde6;color:#000;border:1px solid #000;padding:4px 2px;top:8px;left:8px;box-shadow:2px 2px 0 rgba(0,0,0,.4)}
+  body.embed #leg .lt{color:#555}
+  body.embed #leg .li:hover{background:#0000001a}
+  #ui .pg{padding-left:10px;border-left:1px solid #3a3b40}
+  body.embed #ui .pg{border-left:1px solid #888}
   #load{position:fixed;inset:0;display:grid;place-items:center;color:#777}
   #hint{position:fixed;top:14px;left:16px;color:#666;font-size:12px}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<script>if(/[?&]embed/.test(location.search))document.body.classList.add("embed");</script>
 <div id="load">loading brain…</div>
 <div id="leg"></div>
 <div id="hint">drag to orbit · scroll / pinch to zoom · splat + MRI 2022-02-19</div>
 <div id="ui">
   <div class="g"><button data-m="0" class="on">Head</button><button data-m="1">Brain</button><button data-m="2">Organs</button><button id="colz" class="on">Color</button></div>
-  <div class="g"><button data-ax="cor" class="on">Face</button><button data-ax="sag">Side</button><button data-ax="ax">Top</button><button id="flip">Flip</button><button id="party">Party</button></div>
+  <div class="g"><button data-ax="cor" class="on">Face</button><button data-ax="sag">Side</button><button data-ax="ax">Top</button><button id="flip">Flip</button></div>
+  <div class="g pg"><button id="party">🪩 Party</button></div>
   <div class="g sl"><label>cut <input id="depth" type="range" min="0" max="1" step="0.002" value="0.68"></label><label>tilt <input id="tilt" type="range" min="-45" max="45" step="1" value="0"></label></div>
 </div>
 <script type="module">
@@ -193,7 +208,7 @@ function persp(fov,asp,n,f){const t=1/Math.tan(fov/2);return new Float32Array([t
 // note: camera looks along +z in view space (OpenCV-style, matches splat projection); y flipped in P
 
 // ---------- camera ----------
-let yaw=0.5, pitch=0.1, dist=950; const target=[0,-85,0];
+let yaw=0.5, pitch=0.1, dist=700; const target=[0,-60,0];
 let dirty=true, lastFwd=null;
 let drag=null; const ptrs=new Map();
 cv.addEventListener('pointerdown',e=>{autoSpin=false;cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);});
@@ -233,7 +248,7 @@ function update(){
   dirty=true;
 }
 document.querySelectorAll('[data-ax]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-ax]').forEach(x=>x.classList.remove('on'));b.classList.add('on');axis=b.dataset.ax;update();});
-document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; syncLeg(); if(mode===2){depth.value=1; update();} if(mode===0){dist=950;target[1]=-85;}else if(mode===1){dist=560;target[1]=-20;}else{dist=800;target[1]=-55;} dirty=true;});
+document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; syncLeg(); if(mode===2){depth.value=1; update();} if(mode===0){dist=700;target[1]=-60;}else if(mode===1){dist=440;target[1]=-15;}else{dist=620;target[1]=-45;} dirty=true;});
 document.getElementById('colz').onclick=e=>{colz^=1;e.target.classList.toggle('on',!!colz); syncLeg();dirty=true;};
 document.getElementById('party').onclick=e=>{party=!party; e.target.classList.toggle('on',party); if(party){partyT0=performance.now(); autoSpin=true;} else {depth.value=1; tilt.value=0; update();} dirty=true;};
 document.getElementById('flip').onclick=()=>{flip=!flip;update();};
