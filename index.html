@@ -140,13 +140,13 @@ L=gl.getAttribLocation(cp,'q'); gl.enableVertexAttribArray(L); gl.vertexAttribPo
 const mp = prog(`#version 300 es
 in vec3 p; in vec3 n; in vec4 c; in float r; uniform mat4 V,P; out vec3 wp; out vec3 wn; out vec4 vc; out float vr;
 void main(){ wp=p; wn=n; vc=c; vr=r; gl_Position=P*V*vec4(p,1.); }`,`#version 300 es
-precision highp float; uniform vec4 plane; uniform vec3 eye; uniform int solid, cmode, hasN; uniform vec4 ucol; uniform float alpha;
+precision highp float; uniform vec4 plane; uniform vec3 eye; uniform int solid, cmode, hasN, cutting; uniform vec4 ucol; uniform float alpha;
 in vec3 wp; in vec3 wn; in vec4 vc; in float vr; out vec4 o;
 const vec3 RP[4]=vec3[4](vec3(.9,.62,.62),vec3(.92,.62,.66),vec3(.98,.68,.25),vec3(.62,.45,.95));
 void main(){ if(dot(plane.xyz,wp)+plane.w<0.) discard;
   vec3 N = hasN==1 ? normalize(wn) : normalize(cross(dFdx(wp),dFdy(wp)));
   vec3 Vd=normalize(eye-wp);
-  if(solid==1 && hasN==1 && dot(N,Vd)<0.){ o=vec4(vc.rgb*.62+vec3(.04,.01,.01),1.); return; }
+  if(solid==1 && hasN==1 && dot(N,Vd)<0.){ if(cutting==0) discard; o=vec4(vc.rgb*.62+vec3(.04,.01,.01),1.); return; }
   if(dot(N,Vd)<0.) N=-N;
   vec3 base = cmode==0 ? vc.rgb : cmode==1 ? RP[int(vr+.5)] : ucol.rgb;
   vec3 Ld=normalize(vec3(.4,.6,.7));
@@ -241,7 +241,7 @@ function frame(){
   gl.uniform4fv(U(mp,'plane'),plane); gl.uniform3fv(U(mp,'eye'),eye);
   const draw=(m,{cmode=2,col=[.8,.8,.8],alpha=1,solid=0}={})=>{gl.bindVertexArray(m.vao);
     gl.uniform1i(U(mp,'cmode'),cmode); gl.uniform4f(U(mp,'ucol'),...col,1); gl.uniform1f(U(mp,'alpha'),alpha);
-    gl.uniform1i(U(mp,'solid'),solid); gl.uniform1i(U(mp,'hasN'),m.hasN?1:0);
+    gl.uniform1i(U(mp,'solid'),solid); gl.uniform1i(U(mp,'cutting'),(+depth.value<0.995)?1:0); gl.uniform1i(U(mp,'hasN'),m.hasN?1:0);
     gl.drawElements(gl.TRIANGLES,m.count,gl.UNSIGNED_INT,0);};
   const ghost=(m,opt)=>{ // frontmost-layer transparency
     gl.colorMask(false,false,false,false); gl.depthMask(true); gl.disable(gl.BLEND); draw(m,opt);
