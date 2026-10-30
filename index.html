@@ -17,6 +17,8 @@
   button.on{background:#e6e6e6;color:#111;border-color:#e6e6e6}
   input[type=range]{width:100%;min-width:60px;accent-color:#e6e6e6}
   label{display:flex;gap:4px;align-items:center;color:#999;font-size:12px}
+  #leg{position:fixed;top:34px;left:14px;font-size:11px;color:#bbb;display:none;line-height:1.55;pointer-events:none}
+  #leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
   #load{position:fixed;inset:0;display:grid;place-items:center;color:#777}
   #hint{position:fixed;top:14px;left:16px;color:#666;font-size:12px}
 </style>
@@ -24,6 +26,7 @@
 <body>
 <canvas id="c"></canvas>
 <div id="load">loading brain…</div>
+<div id="leg"></div>
 <div id="hint">drag to orbit · scroll / pinch to zoom · splat + MRI 2022-02-19</div>
 <div id="ui">
   <div class="g"><button data-m="0" class="on">Head</button><button data-m="1">Brain</button><button data-m="2">Organs</button><button id="colz" class="on">Color</button></div>
@@ -106,7 +109,7 @@ function sortSplats(fwd){
 }
 
 // ---------- MRI cap ----------
-const PAL=`const vec3 PAL[10]=vec3[10](vec3(0),vec3(.96,.78,.35),vec3(.80,.30,.30),vec3(.42,.44,.55),vec3(.35,.68,.95),vec3(.92,.55,.62),vec3(.97,.93,.84),vec3(.15,.38,.95),vec3(1.,1.,1.),vec3(.1,.9,.85));`;
+const PAL=`const vec3 PAL[23]=vec3[23](vec3(0,0,0),vec3(0.96,0.78,0.35),vec3(0.8,0.3,0.3),vec3(0.42,0.44,0.55),vec3(0.35,0.68,0.95),vec3(0.92,0.55,0.62),vec3(0.97,0.93,0.84),vec3(0.15,0.38,0.95),vec3(1,1,1),vec3(0.1,0.9,0.85),vec3(0.9,0.1,0.15),vec3(0.95,0.5,0.85),vec3(0.25,0.8,0.4),vec3(0.9,0.6,0.9),vec3(0.85,0.75,0.55),vec3(0.1,0.55,0.55),vec3(1,0.85,0.3),vec3(0.95,0.3,0.6),vec3(0.6,0.9,0.3),vec3(0.6,0.45,0.3),vec3(0.62,0.45,0.95),vec3(0.98,0.68,0.25),vec3(1,0.88,0.7));`;
 const cp = prog(`#version 300 es
 in vec2 q; uniform mat4 V,P; uniform vec3 o,u,v; out vec3 wp;
 void main(){ wp=o+q.x*u+q.y*v; gl_Position=P*V*vec4(wp,1.); }`,`#version 300 es
@@ -119,7 +122,7 @@ void main(){
   vec3 s=texture(vol,t).rgb; if((mode==1?s.b:s.g)<.5) discard;
   float g=pow(clamp(s.r*1.15,0.,1.),.9);
   vec3 c=vec3(g);
-  if(colz==1){ int L=int(texture(lab,t).r*255.+.5); if(L>0) c = L>=8 ? mix(vec3(g),PAL[L],.75) : mix(vec3(g),PAL[L]*(.35+.9*g),.7); }
+  if(colz==1){ int L=int(texture(lab,t).r*255.+.5); if(L>0) c = (L>=8&&L<=11) ? mix(vec3(g),PAL[L],.75) : mix(vec3(g),PAL[L]*(.35+.9*g),.7); }
   o=vec4(c,1.);
 }`);
 function tex3(fmt,ifmt,dims,data,filter){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_3D,t);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
@@ -165,6 +168,10 @@ const BNV=brMod.NV, BNF=brMod.NF, bo=BNV*25+((4-BNV%4)%4);
 const brain=mkMesh(new Float32Array(brBuf,0,BNV*3),new Uint32Array(brBuf.slice(bo,bo+BNF*12)),{N:new Float32Array(brBuf,BNV*12,BNV*3),R:new Uint8Array(brBuf,BNV*24,BNV)});
 const org={}; for(const [k,[nv,nf,off]] of Object.entries(orgMod.H)) org[k]=mkMesh(new Float32Array(orgBuf,off,nv*3),new Uint32Array(orgBuf.slice(off+nv*12,off+nv*12+nf*12)));
 let mode=0, colz=1;
+const ORG=[['ven',[.15,.38,.95]],['eyes',[.97,.97,1]],['sinus',[.1,.9,.85]],['vessels',[.9,.1,.15]],['thal',[.25,.8,.4]],['caud',[.9,.6,.9]],['put',[.85,.75,.55]],['pall',[.1,.55,.55]],['hipp',[1,.85,.3]],['amyg',[.95,.3,.6]],['acc',[.6,.9,.3]],['vdc',[.6,.45,.3]]];
+const LEG=[['Brain',[.92,.62,.66]],['Cerebellum',[.98,.68,.25]],['Brainstem',[.62,.45,.95]],['Ventricles',[.15,.38,.95]],['Thalamus',[.25,.8,.4]],['Caudate',[.9,.6,.9]],['Putamen',[.85,.75,.55]],['Pallidum',[.1,.55,.55]],['Hippocampus',[1,.85,.3]],['Amygdala',[.95,.3,.6]],['Accumbens',[.6,.9,.3]],['Ventral DC',[.6,.45,.3]],['Vessels',[.9,.1,.15]],['Sinuses / air',[.1,.9,.85]],['Eyes',[.97,.97,1]]];
+const legEl=document.getElementById('leg'); legEl.innerHTML=LEG.map(([n,c])=>`<div><i style="background:rgb(${c.map(x=>x*255|0)})"></i>${n}</div>`).join('');
+function syncLeg(){ legEl.style.display=(mode===2&&colz)?'block':'none'; }
 
 // ---------- math ----------
 const sub=(a,b)=>a.map((x,i)=>x-b[i]), dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -204,8 +211,8 @@ function update(){
   dirty=true;
 }
 document.querySelectorAll('[data-ax]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-ax]').forEach(x=>x.classList.remove('on'));b.classList.add('on');axis=b.dataset.ax;update();});
-document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; if(mode===0){dist=950;target[1]=-85;}else if(mode===1){dist=560;target[1]=-20;}else{dist=800;target[1]=-55;} dirty=true;});
-document.getElementById('colz').onclick=e=>{colz^=1;e.target.classList.toggle('on',!!colz);dirty=true;};
+document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; syncLeg(); if(mode===0){dist=950;target[1]=-85;}else if(mode===1){dist=560;target[1]=-20;}else{dist=800;target[1]=-55;} dirty=true;});
+document.getElementById('colz').onclick=e=>{colz^=1;e.target.classList.toggle('on',!!colz); syncLeg();dirty=true;};
 document.getElementById('flip').onclick=()=>{flip=!flip;update();};
 depth.oninput=update; tilt.oninput=update; update();
 
@@ -242,10 +249,8 @@ function frame(){
   const NEU=[.82,.74,.72];
   if(mode===1){ draw(brain,{cmode:colz?1:2,col:[.86,.66,.64]}); return; }
   if(mode===2){
-    draw(org.ven,{col:colz?[.15,.38,.95]:NEU});
-    draw(org.eyes,{col:colz?[.97,.97,1]:NEU});
-    draw(org.sinus,{col:colz?[.1,.9,.85]:NEU});
-    ghost(brain,{cmode:colz?1:2,col:NEU,alpha:.6});
+    for(const [k,c] of ORG) if(org[k]) draw(org[k],{col:colz?c:NEU});
+    ghost(brain,{cmode:colz?1:2,col:NEU,alpha:.35});
     ghost(org.skull,{col:colz?[.95,.9,.78]:NEU,alpha:.3});
     ghost(skin,{cmode:colz?0:2,col:NEU,alpha:.14});
     return; }
