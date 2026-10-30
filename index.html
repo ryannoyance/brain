@@ -17,7 +17,11 @@
   button.on{background:#e6e6e6;color:#111;border-color:#e6e6e6}
   input[type=range]{width:100%;min-width:60px;accent-color:#e6e6e6}
   label{display:flex;gap:4px;align-items:center;color:#999;font-size:12px}
-  #leg{position:fixed;top:34px;left:14px;font-size:11px;color:#bbb;display:none;line-height:1.55;pointer-events:none}
+  #leg{position:fixed;top:30px;left:10px;font-size:11px;color:#bbb;display:none;line-height:1.5;z-index:2;max-height:calc(100vh - 170px);overflow-y:auto}
+  #leg .li{cursor:pointer;padding:1px 6px;border-radius:5px;user-select:none;-webkit-user-select:none}
+  #leg .li:hover{background:#ffffff14}
+  #leg .li.off{opacity:.35;text-decoration:line-through}
+  #leg .lt{color:#777;font-size:10px;padding:0 6px 2px}
   #leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
   @media (max-width:600px){ #ui{width:calc(100vw - 16px)} .g.sl{flex-basis:100%} }
   #load{position:fixed;inset:0;display:grid;place-items:center;color:#777}
@@ -140,10 +144,11 @@ L=gl.getAttribLocation(cp,'q'); gl.enableVertexAttribArray(L); gl.vertexAttribPo
 const mp = prog(`#version 300 es
 in vec3 p; in vec3 n; in vec4 c; in float r; uniform mat4 V,P; out vec3 wp; out vec3 wn; out vec4 vc; out float vr;
 void main(){ wp=p; wn=n; vc=c; vr=r; gl_Position=P*V*vec4(p,1.); }`,`#version 300 es
-precision highp float; uniform vec4 plane; uniform vec3 eye; uniform int solid, cmode, hasN, cutting; uniform vec4 ucol; uniform float alpha;
+precision highp float; uniform vec4 plane; uniform vec3 eye; uniform int solid, cmode, hasN, cutting, hideReg; uniform vec4 ucol; uniform float alpha;
 in vec3 wp; in vec3 wn; in vec4 vc; in float vr; out vec4 o;
 const vec3 RP[4]=vec3[4](vec3(.9,.62,.62),vec3(.92,.62,.66),vec3(.98,.68,.25),vec3(.62,.45,.95));
 void main(){ if(dot(plane.xyz,wp)+plane.w<0.) discard;
+  if(hideReg!=0 && ((hideReg>>int(vr+.5))&1)==1) discard;
   vec3 N = hasN==1 ? normalize(wn) : normalize(cross(dFdx(wp),dFdy(wp)));
   vec3 Vd=normalize(eye-wp);
   if(solid==1 && hasN==1 && dot(N,Vd)<0.){ if(cutting==0) discard; o=vec4(vc.rgb*.62+vec3(.04,.01,.01),1.); return; }
@@ -170,9 +175,12 @@ const brain=mkMesh(new Float32Array(brBuf,0,BNV*3),new Uint32Array(brBuf.slice(b
 const org={}; for(const [k,[nv,nf,off]] of Object.entries(orgMod.H)) org[k]=mkMesh(new Float32Array(orgBuf,off,nv*3),new Uint32Array(orgBuf.slice(off+nv*12,off+nv*12+nf*12)));
 let mode=0, colz=1;
 const ORG=[['ven',[.15,.38,.95]],['eyes',[.97,.97,1]],['sinus',[.1,.9,.85]],['vessels',[.9,.1,.15]],['thal',[.25,.8,.4]],['caud',[.9,.6,.9]],['put',[.85,.75,.55]],['pall',[.1,.55,.55]],['hipp',[1,.85,.3]],['amyg',[.95,.3,.6]],['acc',[.6,.9,.3]],['vdc',[.6,.45,.3]]];
-const LEG=[['Brain',[.92,.62,.66]],['Cerebellum',[.98,.68,.25]],['Brainstem',[.62,.45,.95]],['Ventricles',[.15,.38,.95]],['Thalamus',[.25,.8,.4]],['Caudate',[.9,.6,.9]],['Putamen',[.85,.75,.55]],['Pallidum',[.1,.55,.55]],['Hippocampus',[1,.85,.3]],['Amygdala',[.95,.3,.6]],['Accumbens',[.6,.9,.3]],['Ventral DC',[.6,.45,.3]],['Vessels',[.9,.1,.15]],['Sinuses / air',[.1,.9,.85]],['Eyes',[.97,.97,1]]];
-const legEl=document.getElementById('leg'); legEl.innerHTML=LEG.map(([n,c])=>`<div><i style="background:rgb(${c.map(x=>x*255|0)})"></i>${n}</div>`).join('');
-function syncLeg(){ legEl.style.display=(mode===2&&colz)?'block':'none'; }
+const LEG=[['brain','Brain',[.92,.62,.66]],['cereb','Cerebellum',[.98,.68,.25]],['stem','Brainstem',[.62,.45,.95]],['ven','Ventricles',[.15,.38,.95]],['thal','Thalamus',[.25,.8,.4]],['caud','Caudate',[.9,.6,.9]],['put','Putamen',[.85,.75,.55]],['pall','Pallidum',[.1,.55,.55]],['hipp','Hippocampus',[1,.85,.3]],['amyg','Amygdala',[.95,.3,.6]],['acc','Accumbens',[.6,.9,.3]],['vdc','Ventral DC',[.6,.45,.3]],['vessels','Vessels',[.9,.1,.15]],['sinus','Sinuses / air',[.1,.9,.85]],['eyes','Eyes',[.97,.97,1]],['skull','Skull',[.95,.9,.78]],['skin','Skin',[.85,.7,.62]]];
+const vis={}; LEG.forEach(([k])=>vis[k]=true);
+const legEl=document.getElementById('leg');
+legEl.innerHTML='<div class="lt">tap to show / hide</div>'+LEG.map(([k,n,c])=>`<div class="li" data-k="${k}"><i style="background:rgb(${c.map(x=>x*255|0)})"></i>${n}</div>`).join('');
+legEl.querySelectorAll('.li').forEach(el=>el.onclick=()=>{const k=el.dataset.k; vis[k]=!vis[k]; el.classList.toggle('off',!vis[k]); dirty=true;});
+function syncLeg(){ legEl.style.display=(mode===2)?'block':'none'; }
 
 // ---------- math ----------
 const sub=(a,b)=>a.map((x,i)=>x-b[i]), dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -212,7 +220,7 @@ function update(){
   dirty=true;
 }
 document.querySelectorAll('[data-ax]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-ax]').forEach(x=>x.classList.remove('on'));b.classList.add('on');axis=b.dataset.ax;update();});
-document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; syncLeg(); if(mode===0){dist=950;target[1]=-85;}else if(mode===1){dist=560;target[1]=-20;}else{dist=800;target[1]=-55;} dirty=true;});
+document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; syncLeg(); if(mode===2){depth.value=1; update();} if(mode===0){dist=950;target[1]=-85;}else if(mode===1){dist=560;target[1]=-20;}else{dist=800;target[1]=-55;} dirty=true;});
 document.getElementById('colz').onclick=e=>{colz^=1;e.target.classList.toggle('on',!!colz); syncLeg();dirty=true;};
 document.getElementById('flip').onclick=()=>{flip=!flip;update();};
 depth.oninput=update; tilt.oninput=update; update();
@@ -250,10 +258,13 @@ function frame(){
   const NEU=[.82,.74,.72];
   if(mode===1){ draw(brain,{cmode:colz?1:2,col:[.86,.66,.64]}); return; }
   if(mode===2){
-    for(const [k,c] of ORG) if(org[k]) draw(org[k],{col:colz?c:NEU});
-    ghost(brain,{cmode:colz?1:2,col:NEU,alpha:.35});
-    ghost(org.skull,{col:colz?[.95,.9,.78]:NEU,alpha:.3});
-    ghost(skin,{cmode:colz?0:2,col:NEU,alpha:.14});
+    for(const [k,c] of ORG) if(org[k]&&vis[k]) draw(org[k],{col:colz?c:NEU});
+    const hide=(vis.brain?0:2)|(vis.cereb?0:4)|(vis.stem?0:8);
+    gl.uniform1i(U(mp,'hideReg'),hide);
+    if(hide!==14) ghost(brain,{cmode:colz?1:2,col:NEU,alpha:.35});
+    gl.uniform1i(U(mp,'hideReg'),0);
+    if(vis.skull) ghost(org.skull,{col:colz?[.95,.9,.78]:NEU,alpha:.3});
+    if(vis.skin) ghost(skin,{cmode:colz?0:2,col:NEU,alpha:.14});
     return; }
   draw(skin,{cmode:0,solid:1});
   // splats
