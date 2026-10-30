@@ -19,6 +19,7 @@
   label{display:flex;gap:4px;align-items:center;color:#999;font-size:12px}
   #leg{position:fixed;top:34px;left:14px;font-size:11px;color:#bbb;display:none;line-height:1.55;pointer-events:none}
   #leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+  @media (max-width:600px){ #ui{width:calc(100vw - 16px)} .g.sl{flex-basis:100%} }
   #load{position:fixed;inset:0;display:grid;place-items:center;color:#777}
   #hint{position:fixed;top:14px;left:16px;color:#666;font-size:12px}
 </style>
@@ -145,7 +146,7 @@ const vec3 RP[4]=vec3[4](vec3(.9,.62,.62),vec3(.92,.62,.66),vec3(.98,.68,.25),ve
 void main(){ if(dot(plane.xyz,wp)+plane.w<0.) discard;
   vec3 N = hasN==1 ? normalize(wn) : normalize(cross(dFdx(wp),dFdy(wp)));
   vec3 Vd=normalize(eye-wp);
-  if(solid==1 && hasN==1 && dot(N,Vd)<0.){ o=vec4(.27,.24,.23,1.); return; }
+  if(solid==1 && hasN==1 && dot(N,Vd)<0.){ o=vec4(vc.rgb*.62+vec3(.04,.01,.01),1.); return; }
   if(dot(N,Vd)<0.) N=-N;
   vec3 base = cmode==0 ? vc.rgb : cmode==1 ? RP[int(vr+.5)] : ucol.rgb;
   vec3 Ld=normalize(vec3(.4,.6,.7));
