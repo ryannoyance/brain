@@ -156,7 +156,7 @@ void main(){ if(cutx(wp)) discard;
   if(dot(N,Vd)<0.) N=-N;
   vec3 base = cmode==0 ? vc.rgb : cmode==1 ? RP[int(vr+.5)] : ucol.rgb;
   vec3 Ld=normalize(vec3(.4,.6,.7));
-  float l=.35+.45*max(dot(N,Ld),0.)+.3*max(dot(N,Vd),0.);
+  float l = cmode==0 ? .62+.25*max(dot(N,Ld),0.)+.2*max(dot(N,Vd),0.) : .35+.45*max(dot(N,Ld),0.)+.3*max(dot(N,Vd),0.);
   float spec=.15*pow(max(dot(reflect(-Vd,N),Ld),0.),20.);
   o=vec4((base*l+spec)*alpha, alpha); }`);
 function mkMesh(P,F,{N=null,C=null,R=null}={}){
@@ -205,18 +205,18 @@ cv.addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId))return;const p=p
 const up=e=>ptrs.delete(e.pointerId); cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
 cv.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(200,Math.min(1500,dist*Math.exp(e.deltaY*0.001)));dirty=true;},{passive:false});
 
-// ---------- party mode ----------
-let party=false, autoSpin=true; const t0=performance.now();
-const OCT=[[1,1,1],[-1,1,1],[1,-1,1],[-1,-1,1],[1,1,-1],[-1,1,-1]];
-function mkPlane(n,d){ const p=n.map(x=>-x*d); const h=Math.abs(n[1])>.9?[1,0,0]:[0,1,0]; const u=norm(cross(h,n)); return {p:[...n,-dot(n,p)],o:p,u,v:cross(n,u)}; }
-function partyPlanes(){
-  const t=(performance.now()-t0)/1000, k=Math.floor(t/7)%OCT.length, [sx,sy,sz]=OCT[k];
-  const a=0.35*Math.sin(t*0.23);
-  const nx=[-sx*Math.cos(a),0,-sx*Math.sin(a)], nz=[sz*Math.sin(a),0,-sz*Math.cos(a)], ny=[0,-sy,0];
-  const ph=t*0.9;
-  return [ mkPlane(nx, 5+35*Math.sin(ph)), mkPlane(ny, -10+40*Math.sin(ph*0.8+1.3)), mkPlane(nz, 5+45*Math.sin(ph*0.7+2.1)) ]
-    .map((q,i)=>q);
+// ---------- sweep tour (Party) ----------
+let party=false, autoSpin=true, partyT0=0;
+const TOUR=['sag','cor','ax'];
+function partyStep(){
+  const t=(performance.now()-partyT0)/1000, per=9, k=Math.floor(t/per), f=(t%per)/per;
+  axis=TOUR[k%3]; flip=(Math.floor(k/3)%2)===1;
+  depth.value=(0.5+0.5*Math.cos(f*2*Math.PI))*0.97+0.03;
+  tilt.value=Math.round(12*Math.sin(t*0.4));
+  document.querySelectorAll('[data-ax]').forEach(x=>x.classList.toggle('on',x.dataset.ax===axis));
+  update();
 }
+function partyPlanes(){ return [{p:plane,o:capO,u:capU,v:capV}]; }
 // ---------- cut controls ----------
 const ext={cor:[-110,145],sag:[-90,90],ax:[-125,92]};
 const base={cor:[0,0,-1],sag:[-1,0,0],ax:[0,-1,0]};
@@ -235,13 +235,13 @@ function update(){
 document.querySelectorAll('[data-ax]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-ax]').forEach(x=>x.classList.remove('on'));b.classList.add('on');axis=b.dataset.ax;update();});
 document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=+b.dataset.m; syncLeg(); if(mode===2){depth.value=1; update();} if(mode===0){dist=950;target[1]=-85;}else if(mode===1){dist=560;target[1]=-20;}else{dist=800;target[1]=-55;} dirty=true;});
 document.getElementById('colz').onclick=e=>{colz^=1;e.target.classList.toggle('on',!!colz); syncLeg();dirty=true;};
-document.getElementById('party').onclick=e=>{party=!party; e.target.classList.toggle('on',party); dirty=true;};
+document.getElementById('party').onclick=e=>{party=!party; e.target.classList.toggle('on',party); if(party){partyT0=performance.now(); autoSpin=true;} else {depth.value=1; tilt.value=0; update();} dirty=true;};
 document.getElementById('flip').onclick=()=>{flip=!flip;update();};
 depth.oninput=update; tilt.oninput=update; update();
 
 function frame(){
   requestAnimationFrame(frame);
-  if(party){ dirty=true; if(autoSpin) yaw+=0.004; }
+  if(party){ partyStep(); dirty=true; if(autoSpin) yaw+=0.006; }
   if(!dirty) return; dirty=false;
   const eye=[target[0]+dist*Math.cos(pitch)*Math.sin(yaw), target[1]+dist*Math.sin(pitch), target[2]+dist*Math.cos(pitch)*Math.cos(yaw)];
   const V=lookAt(eye,target), P=persp(0.6,cv.width/cv.height,10,5000);
